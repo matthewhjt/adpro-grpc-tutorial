@@ -1,7 +1,8 @@
 use services::{
+    chat_service_server::{ChatService, ChatServiceServer},
     payment_service_server::{PaymentService, PaymentServiceServer},
     transaction_service_server::{TransactionService, TransactionServiceServer},
-    PaymentRequest, PaymentResponse, TransactionRequest, TransactionResponse,
+    ChatMessage, PaymentRequest, PaymentResponse, TransactionRequest, TransactionResponse,
 };
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -36,6 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Server::builder()
         .add_service(PaymentServiceServer::new(payment_service))
         .add_service(TransactionServiceServer::new(transaction_service))
+        .add_service(ChatServiceServer::new(chat_service))
         .serve(addr)
         .await?;
     Ok(())
@@ -75,6 +77,35 @@ impl TransactionService for MyTransactionService {
                 if i % 10 == 9 {
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 }
+            }
+        });
+        Ok(Response::new(ReceiverStream::new(rx)))
+    }
+}
+
+#[derive(Default)]
+pub struct MyChatService {}
+
+#[tonic::async_trait]
+impl ChatService for MyChatService {
+    type ChatStream = ReceiverStream<Result<ChatMessage, Status>>;
+
+    async fn chat(
+        &self,
+        request: Request<tonic::Streaming<ChatMessage>>,
+    ) -> Result<Response<Self::ChatStream>, Status> {
+        let mut stream = request.into_inner();
+        let (tx, rx) = mpsc::channel(10);
+
+        tokio::spawn(async move {
+            while let Some(message) = stream.message().await.unwrap_or_else(|_| None) {
+                println!("Received message: {:?}", message);
+                let reply = ChatMessage{
+                    user_id : message.user_id.clone(),
+                    message: format!("Terima kasih telah melakukan chat kepada CS virtual, Pesan anda akan dibalas pada jam kerja. pesan anda: {}", message.message),
+                };
+
+                tx.send(Ok(reply)).await.unwrap_or_else(|_| {});
             }
         });
         Ok(Response::new(ReceiverStream::new(rx)))
